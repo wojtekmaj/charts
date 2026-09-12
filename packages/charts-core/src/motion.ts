@@ -1229,12 +1229,10 @@ function createBarTracks(
   groups.forEach((group, seriesIndex) => {
     const horizontal = group.classList.contains('ts-chart__bar-x')
     const shapes = barShapeElements(group)
-    const seriesKey =
-      group.getAttribute('data-ts-key') ?? `series:${seriesIndex}`
+    const seriesKey = elementKey(group) ?? `series:${seriesIndex}`
 
     shapes.forEach((shape, datumIndex) => {
-      const key =
-        shape.getAttribute('data-ts-key') ?? `${seriesKey}:${datumIndex}`
+      const key = elementKey(shape) ?? `${seriesKey}:${datumIndex}`
       const point = points.get(key)
       const geometry = barShapeGeometry(shape, scene)
       if (!geometry) return
@@ -1260,53 +1258,62 @@ function createBarTracks(
         point,
       })
 
-      shape.dataset.tsMotionRole = 'bar'
-      if (shape.localName === 'path' && geometry.cornerRadii) {
-        const to = barPathGeometryValues(geometry)
-        const from = barPathEntranceValues(to, horizontal, baseline)
-        const states = elementValueStates(runtime, shape, 'bar-geometry', from)
-        const apply = (values: readonly number[]) => {
-          applyBarPathGeometry(shape, values)
-        }
-        const finish = () => {
-          finishBarShapeGeometry(shape, geometry)
-          delete shape.dataset.tsMotionRole
-        }
-        apply(from)
-        tracks.push({
-          ...timing,
-          values: bindMotionValues(states, from, to),
-          apply,
-          finish,
-          cancel: () => delete shape.dataset.tsMotionRole,
-        })
-        return
-      }
-      const names = horizontal ? ['x', 'width'] : ['y', 'height']
-      const from = [baseline, 0]
-      const to = horizontal ? [targetX, targetWidth] : [targetY, targetHeight]
-      const states = names.flatMap((name, index) =>
-        elementValueStates(runtime, shape, name, [from[index] ?? 0]),
+      tracks.push(
+        createBarEntranceTrack(
+          shape,
+          geometry,
+          horizontal,
+          baseline,
+          timing,
+          runtime,
+        ),
       )
-      const apply = (values: readonly number[]) => {
-        applyBarShapeGeometry(shape, geometry, horizontal, values)
-      }
-      const finish = () => {
-        finishBarShapeGeometry(shape, geometry)
-        delete shape.dataset.tsMotionRole
-      }
-      apply(from)
-      tracks.push({
-        ...timing,
-        values: bindMotionValues(states, from, to),
-        apply,
-        finish,
-        cancel: () => delete shape.dataset.tsMotionRole,
-      })
     })
   })
 
   return tracks
+}
+
+function createBarEntranceTrack(
+  element: BarShapeElement,
+  geometry: BarShapeGeometry,
+  horizontal: boolean,
+  baseline: number,
+  timing: ResolvedTiming,
+  runtime: MotionRuntime,
+): MotionTrack {
+  setMotionRole(element, 'bar')
+  const pathGeometry =
+    element.localName === 'path' && geometry.cornerRadii
+      ? barPathGeometryValues(geometry)
+      : undefined
+  const to =
+    pathGeometry ??
+    (horizontal ? [geometry.x, geometry.width] : [geometry.y, geometry.height])
+  const from = pathGeometry
+    ? barPathEntranceValues(pathGeometry, horizontal, baseline)
+    : [baseline, 0]
+  const states = pathGeometry
+    ? elementValueStates(runtime, element, 'bar-geometry', from)
+    : (horizontal ? ['x', 'width'] : ['y', 'height']).flatMap((name, index) =>
+        elementValueStates(runtime, element, name, [from[index] ?? 0]),
+      )
+  const apply = pathGeometry
+    ? (values: readonly number[]) => applyBarPathGeometry(element, values)
+    : (values: readonly number[]) =>
+        applyBarShapeGeometry(element, geometry, horizontal, values)
+  apply(from)
+
+  return {
+    ...timing,
+    values: bindMotionValues(states, from, to),
+    apply,
+    finish() {
+      finishBarShapeGeometry(element, geometry)
+      clearMotionRole(element)
+    },
+    cancel: () => clearMotionRole(element),
+  }
 }
 
 type BarShapeElement = SVGRectElement | SVGPathElement
@@ -1408,7 +1415,7 @@ function barShapeGeometry(
       height: numberAttribute(element, 'height'),
     }
   }
-  const key = element.getAttribute('data-ts-key')
+  const key = elementKey(element)
   const node = key ? sceneNodeContext(scene, key)?.node : undefined
   if (node?.kind === 'rect' && node.cornerRadii) {
     return {
@@ -1490,8 +1497,7 @@ function createCartesianPathTracks(
     const role: ChartMotionRole = group.classList.contains('ts-chart__area')
       ? 'area'
       : 'line'
-    const seriesKey =
-      group.getAttribute('data-ts-key') ?? `${role}:${seriesIndex}`
+    const seriesKey = elementKey(group) ?? `${role}:${seriesIndex}`
     const timing = timingFor({
       phase: 'enter',
       role,
@@ -1506,31 +1512,11 @@ function createCartesianPathTracks(
     })
     const horizontal = scenePathAffinity(scene, seriesKey) === 'y'
     const baseline = resolvePathBaseline(scene, horizontal)
-    const previousTransform = group.getAttribute('transform')
-    group.dataset.tsMotionRole = role
-    const apply = (values: readonly number[]) => {
-      const progress = values[0] ?? 0
-      const transform = horizontal
+    return createTransformEntranceTrack(group, role, timing, (progress) =>
+      horizontal
         ? `matrix(${formatNumber(progress)} 0 0 1 ${formatNumber(baseline * (1 - progress))} 0)`
-        : `matrix(1 0 0 ${formatNumber(progress)} 0 ${formatNumber(baseline * (1 - progress))})`
-      group.setAttribute(
-        'transform',
-        previousTransform ? `${previousTransform} ${transform}` : transform,
-      )
-    }
-    const cleanup = () => {
-      if (previousTransform === null) group.removeAttribute('transform')
-      else group.setAttribute('transform', previousTransform)
-      delete group.dataset.tsMotionRole
-    }
-    apply([0])
-    return {
-      ...timing,
-      values: bindMotionValues(undefined, [0], [1]),
-      apply,
-      finish: cleanup,
-      cancel: cleanup,
-    }
+        : `matrix(1 0 0 ${formatNumber(progress)} 0 ${formatNumber(baseline * (1 - progress))})`,
+    )
   })
 }
 
@@ -1552,8 +1538,7 @@ function createRadialPathTracks(
       : group.classList.contains('ts-chart__radial-dot')
         ? 'dot'
         : 'line'
-    const seriesKey =
-      group.getAttribute('data-ts-key') ?? `${role}:${seriesIndex}`
+    const seriesKey = elementKey(group) ?? `${role}:${seriesIndex}`
     const timing = timingFor({
       phase: 'enter',
       role,
@@ -1566,30 +1551,43 @@ function createRadialPathTracks(
       datum: undefined,
       point: undefined,
     })
-    const previousTransform = group.getAttribute('transform')
-    group.dataset.tsMotionRole = role
-    const apply = (values: readonly number[]) => {
-      const progress = values[0] ?? 0
-      const transform = `scale(${formatNumber(progress)})`
-      group.setAttribute(
-        'transform',
-        previousTransform ? `${previousTransform} ${transform}` : transform,
-      )
-    }
-    const cleanup = () => {
-      if (previousTransform === null) group.removeAttribute('transform')
-      else group.setAttribute('transform', previousTransform)
-      delete group.dataset.tsMotionRole
-    }
-    apply([0])
-    return {
-      ...timing,
-      values: bindMotionValues(undefined, [0], [1]),
-      apply,
-      finish: cleanup,
-      cancel: cleanup,
-    }
+    return createTransformEntranceTrack(
+      group,
+      role,
+      timing,
+      (progress) => `scale(${formatNumber(progress)})`,
+    )
   })
+}
+
+function createTransformEntranceTrack(
+  group: SVGGElement,
+  role: ChartMotionRole,
+  timing: ResolvedTiming,
+  transformAt: (progress: number) => string,
+): MotionTrack {
+  const previousTransform = group.getAttribute('transform')
+  setMotionRole(group, role)
+  const apply = (values: readonly number[]) => {
+    const transform = transformAt(values[0] ?? 0)
+    group.setAttribute(
+      'transform',
+      previousTransform ? `${previousTransform} ${transform}` : transform,
+    )
+  }
+  const cleanup = () => {
+    restoreAttribute(group, 'transform', previousTransform)
+    clearMotionRole(group)
+  }
+  apply([0])
+
+  return {
+    ...timing,
+    values: bindMotionValues(undefined, [0], [1]),
+    apply,
+    finish: cleanup,
+    cancel: cleanup,
+  }
 }
 
 function createArcTracks(
@@ -1599,7 +1597,7 @@ function createArcTracks(
 ): MotionTrack[] {
   const groups = [...root.querySelectorAll<SVGGElement>('g.ts-chart__arc')]
   return groups.flatMap((group, seriesIndex) => {
-    const seriesKey = group.getAttribute('data-ts-key') ?? `arc:${seriesIndex}`
+    const seriesKey = elementKey(group) ?? `arc:${seriesIndex}`
     const geometry = sceneArcGeometry(scene, seriesKey)
     if (!geometry) return []
     const role: ChartMotionRole = group.classList.contains('ts-chart__bar')
@@ -1638,7 +1636,7 @@ function createArcTracks(
     definitions.append(clip)
     const previousClip = group.getAttribute('clip-path')
     group.setAttribute('clip-path', `url(#${id})`)
-    group.dataset.tsMotionRole = role
+    setMotionRole(group, role)
     const apply = (values: readonly number[]) => {
       const progress = Math.max(0, Math.min(1, values[0] ?? 0))
       path.setAttribute(
@@ -1651,9 +1649,8 @@ function createArcTracks(
       )
     }
     const cleanup = () => {
-      if (previousClip === null) group.removeAttribute('clip-path')
-      else group.setAttribute('clip-path', previousClip)
-      delete group.dataset.tsMotionRole
+      restoreAttribute(group, 'clip-path', previousClip)
+      clearMotionRole(group)
       clip.remove()
       if (
         definitions?.dataset.tsMotionDefs !== undefined &&
@@ -2140,7 +2137,7 @@ function addUpdateTrack(
 ) {
   let timingContext = elementTimingContext(current, 'update', context.scene)
   let timing: ResolvedTiming | undefined
-  const pathKey = current.getAttribute('data-ts-key')
+  const pathKey = elementKey(current)
   const rolling = pathKey ? context.pathPlans.elements.get(pathKey) : undefined
   const rollingTransform =
     rolling?.outcome.kind === 'transform'
@@ -2206,7 +2203,7 @@ function addUpdateTrack(
   }
 
   if (rollingTransform && timingContext && rolling) {
-    current.setAttribute('data-ts-motion-role', timingContext.role)
+    setMotionRole(current, timingContext.role)
     const apply = (values: readonly number[]) => {
       current.setAttribute(
         'transform',
@@ -2225,10 +2222,10 @@ function addUpdateTrack(
       apply,
       finish() {
         current.removeAttribute('transform')
-        current.removeAttribute('data-ts-motion-role')
+        clearMotionRole(current)
       },
       cancel() {
-        current.removeAttribute('data-ts-motion-role')
+        clearMotionRole(current)
       },
     })
   }
@@ -2244,7 +2241,7 @@ function addUpdateTrack(
     pointRolling?.outcome.kind === 'transform'
       ? pointRolling.timing
       : context.timingFor(timingContext)
-  current.setAttribute('data-ts-motion-role', timingContext.role)
+  setMotionRole(current, timingContext.role)
   const states = attributes.flatMap((attribute) =>
     elementValueStates(
       context.runtime,
@@ -2274,10 +2271,10 @@ function addUpdateTrack(
     },
     finish() {
       finishMotionAttributes(current, attributes)
-      current.removeAttribute('data-ts-motion-role')
+      clearMotionRole(current)
     },
     cancel() {
-      current.removeAttribute('data-ts-motion-role')
+      clearMotionRole(current)
     },
   })
 }
@@ -2297,9 +2294,9 @@ function addBarPathUpdateTrack(
   ) {
     return false
   }
-  const key = current.getAttribute('data-ts-key')
+  const key = elementKey(current)
   const targetPath = next.getAttribute('d')
-  if (!key || next.getAttribute('data-ts-key') !== key || !targetPath) {
+  if (!key || elementKey(next) !== key || !targetPath) {
     return false
   }
   const previous = sceneNodeContext(context.previousScene, key)?.node
@@ -2327,7 +2324,7 @@ function addBarPathUpdateTrack(
       state.velocity === 0,
   )
   if (current.getAttribute('d') === targetPath && settledAtTarget) return false
-  current.setAttribute('data-ts-motion-role', timingContext.role)
+  setMotionRole(current, timingContext.role)
   tracks.push({
     ...context.timingFor(timingContext),
     values: bindMotionValues(states, sourceValues, targetValues),
@@ -2336,10 +2333,10 @@ function addBarPathUpdateTrack(
     },
     finish() {
       current.setAttribute('d', targetPath)
-      current.removeAttribute('data-ts-motion-role')
+      clearMotionRole(current)
     },
     cancel() {
-      current.removeAttribute('data-ts-motion-role')
+      clearMotionRole(current)
     },
   })
   return true
@@ -2353,7 +2350,7 @@ function addSemanticPathUpdateTrack(
   timingContext: ChartMotionContext | undefined,
 ) {
   if (current.localName !== 'path') return false
-  const key = current.getAttribute('data-ts-key')
+  const key = elementKey(current)
   const targetPath = next.getAttribute('d')
   if (!key || !targetPath || !context.previousScene) return false
   const previous = sceneMotionEntry(context.previousScene, key)?.metadata.path
@@ -2368,7 +2365,7 @@ function addSemanticPathUpdateTrack(
     geometry.source,
     context.runtime,
   )
-  current.setAttribute('data-ts-motion-role', resolvedContext.role)
+  setMotionRole(current, resolvedContext.role)
   tracks.push(
     semanticPathTrack({
       element: current,
@@ -2378,10 +2375,10 @@ function addSemanticPathUpdateTrack(
       timing: context.timingFor(resolvedContext),
       runtime: context.runtime,
       finish() {
-        current.removeAttribute('data-ts-motion-role')
+        clearMotionRole(current)
       },
       cancel() {
-        current.removeAttribute('data-ts-motion-role')
+        clearMotionRole(current)
       },
     }),
   )
@@ -2442,7 +2439,7 @@ function addEnterMotionTrack(
   const timingContext = elementTimingContext(element, 'enter', context.scene)
   if (!timingContext) return
   const timing = context.timingFor(timingContext)
-  element.setAttribute('data-ts-motion-role', timingContext.role)
+  setMotionRole(element, timingContext.role)
 
   const pointRolling = timingContext.point
     ? context.pathPlans.points.get(pointIdentity(timingContext.point))
@@ -2450,7 +2447,7 @@ function addEnterMotionTrack(
   if (element.localName === 'circle' && pointRolling) {
     if (pointRolling.outcome.kind === 'fallback') {
       if (pointRolling.outcome.fallback === 'snap') {
-        element.removeAttribute('data-ts-motion-role')
+        clearMotionRole(element)
         return
       }
     } else {
@@ -2470,10 +2467,10 @@ function addEnterMotionTrack(
         apply,
         finish() {
           apply(to)
-          element.removeAttribute('data-ts-motion-role')
+          clearMotionRole(element)
         },
         cancel() {
-          element.removeAttribute('data-ts-motion-role')
+          clearMotionRole(element)
         },
       })
       return
@@ -2488,7 +2485,7 @@ function addEnterMotionTrack(
     const horizontal = Boolean(element.closest('g.ts-chart__bar-x'))
     const geometry = barShapeGeometry(element, context.scene)
     if (!geometry) {
-      element.removeAttribute('data-ts-motion-role')
+      clearMotionRole(element)
       return
     }
     const { x: targetX, y: targetY } = geometry
@@ -2500,55 +2497,16 @@ function addEnterMotionTrack(
       horizontal,
       horizontal ? targetX : targetY + targetHeight,
     )
-    if (element.localName === 'path' && geometry.cornerRadii) {
-      const to = barPathGeometryValues(geometry)
-      const from = barPathEntranceValues(to, horizontal, baseline)
-      const states = elementValueStates(
-        context.runtime,
+    tracks.push(
+      createBarEntranceTrack(
         element,
-        'bar-geometry',
-        from,
-      )
-      const apply = (values: readonly number[]) => {
-        applyBarPathGeometry(element, values)
-      }
-      apply(from)
-      tracks.push({
-        ...timing,
-        values: bindMotionValues(states, from, to),
-        apply,
-        finish() {
-          finishBarShapeGeometry(element, geometry)
-          element.removeAttribute('data-ts-motion-role')
-        },
-        cancel() {
-          element.removeAttribute('data-ts-motion-role')
-        },
-      })
-      return
-    }
-    const names = horizontal ? ['x', 'width'] : ['y', 'height']
-    const from = [baseline, 0]
-    const to = horizontal ? [targetX, targetWidth] : [targetY, targetHeight]
-    const states = names.flatMap((name, index) =>
-      elementValueStates(context.runtime, element, name, [from[index] ?? 0]),
+        geometry,
+        horizontal,
+        baseline,
+        timing,
+        context.runtime,
+      ),
     )
-    const apply = (values: readonly number[]) => {
-      applyBarShapeGeometry(element, geometry, horizontal, values)
-    }
-    apply(from)
-    tracks.push({
-      ...timing,
-      values: bindMotionValues(states, from, to),
-      apply,
-      finish() {
-        finishBarShapeGeometry(element, geometry)
-        element.removeAttribute('data-ts-motion-role')
-      },
-      cancel() {
-        element.removeAttribute('data-ts-motion-role')
-      },
-    })
     return
   }
 
@@ -2591,12 +2549,11 @@ function addEnterMotionTrack(
       element.setAttribute('opacity', formatNumber(values[0] ?? 0))
     },
     finish() {
-      if (targetOpacity === null) element.removeAttribute('opacity')
-      else element.setAttribute('opacity', targetOpacity)
-      element.removeAttribute('data-ts-motion-role')
+      restoreAttribute(element, 'opacity', targetOpacity)
+      clearMotionRole(element)
     },
     cancel() {
-      element.removeAttribute('data-ts-motion-role')
+      clearMotionRole(element)
     },
   })
 }
@@ -2647,7 +2604,7 @@ function addExitMotionTrack(
       element.setAttribute('cx', formatNumber(values[0] ?? targetX))
       element.setAttribute('cy', formatNumber(values[1] ?? targetY))
     }
-    element.setAttribute('data-ts-motion-role', timingContext.role)
+    setMotionRole(element, timingContext.role)
     tracks.push({
       ...pointRolling.timing,
       values: bindMotionValues(undefined, [startX, startY], [targetX, targetY]),
@@ -2689,7 +2646,7 @@ function addExitMotionTrack(
   }
   const target = Number(element.getAttribute('opacity') ?? 1)
   const opacity = Number.isFinite(target) ? target : 1
-  element.setAttribute('data-ts-motion-role', timingContext.role)
+  setMotionRole(element, timingContext.role)
   const states = elementValueStates(context.runtime, element, 'opacity', [
     opacity,
   ])
@@ -2737,7 +2694,7 @@ function hierarchyMotionRelation(
   if (element.localName !== 'path' || !ownerScene || !relatedScene) {
     return undefined
   }
-  const key = element.getAttribute('data-ts-key')
+  const key = elementKey(element)
   const ownerPath = element.getAttribute('d')
   if (!key || !ownerPath) return undefined
   const owner = sceneMotionEntry(ownerScene, key)
@@ -2758,8 +2715,7 @@ function hierarchyMotionRelation(
   const root = element.closest<SVGSVGElement>('svg')
   const relatedElement = root
     ? [...root.querySelectorAll<Element>('path[data-ts-key]')].find(
-        (candidate) =>
-          candidate.getAttribute('data-ts-key') === ancestor.node.key,
+        (candidate) => elementKey(candidate) === ancestor.node.key,
       )
     : undefined
   const relatedPath = relatedElement?.getAttribute('d')
@@ -2882,11 +2838,9 @@ function elementTimingContext(
       ]
     : [group]
   const seriesIndex = Math.max(0, groups.indexOf(group))
-  const seriesKey =
-    group.getAttribute('data-ts-key') ?? `${role}:${seriesIndex}`
+  const seriesKey = elementKey(group) ?? `${role}:${seriesIndex}`
   const key =
-    element.getAttribute('data-ts-key') ??
-    (role === 'line' ? seriesKey : `${seriesKey}:0`)
+    elementKey(element) ?? (role === 'line' ? seriesKey : `${seriesKey}:0`)
   const point = scene.points.find(
     (candidate) => candidate.key === key || key === `${candidate.key}:dot`,
   )
@@ -2912,12 +2866,12 @@ function guideOrMarkTimingContext(
   phase: ChartMotionPhase,
   scene: ChartScene,
 ): ChartMotionContext | undefined {
-  const key = element.getAttribute('data-ts-key')
+  const key = elementKey(element)
   if (!key) return undefined
 
   const focusGuide = element.closest<SVGGElement>('g.ts-chart__crosshair')
   if (focusGuide) {
-    const ownerKey = focusGuide.getAttribute('data-ts-key') ?? key
+    const ownerKey = elementKey(focusGuide) ?? key
     const markId = motionMarkId(scene, ownerKey)
     return {
       phase,
@@ -2991,8 +2945,7 @@ function guideOrMarkTimingContext(
             : key
     const peers = parent
       ? [...parent.querySelectorAll<Element>('[data-ts-key]')].filter(
-          (candidate) =>
-            candidate.getAttribute('data-ts-key')?.startsWith(prefix) ?? false,
+          (candidate) => elementKey(candidate)?.startsWith(prefix) ?? false,
         )
       : [element]
     return {
@@ -3027,7 +2980,7 @@ function guideOrMarkTimingContext(
   while (owner.parentElement && owner.parentNode !== ownerParent) {
     owner = owner.parentElement
   }
-  const ownerKey = owner.getAttribute('data-ts-key') ?? key
+  const ownerKey = elementKey(owner) ?? key
   const markId =
     point?.markId ?? focusContext?.markId ?? motionMarkId(scene, ownerKey)
   const role = markMotionRole(owner, element)
@@ -3086,7 +3039,7 @@ function retargetFocusContext(
       point: ChartPoint | undefined
     }
   | undefined {
-  const layerKey = focusLayer.getAttribute('data-ts-key')
+  const layerKey = elementKey(focusLayer)
   if (!layerKey) return undefined
   const layer = findSceneGroup(scene.nodes, layerKey)
   if (!layer?.focus?.retarget) return undefined
@@ -3103,7 +3056,7 @@ function retargetFocusContext(
   let slot: number | undefined
   let selectionKeySeen = false
   while (current && current !== focusLayer) {
-    const key = current.getAttribute('data-ts-key')
+    const key = elementKey(current)
     if (key?.startsWith(prefix)) {
       selectionKeySeen = true
       const encoded = key.slice(prefix.length).split(':')[0] ?? ''
@@ -3569,7 +3522,7 @@ function keyedElements(root: SVGSVGElement, selector: string) {
 function keyedElementMap(root: ParentNode, selector: string) {
   const result = new Map<string, Element>()
   for (const element of root.querySelectorAll(selector)) {
-    const key = element.getAttribute('data-ts-key')
+    const key = elementKey(element)
     if (key && !result.has(key)) result.set(key, element)
   }
   return result
@@ -3707,7 +3660,7 @@ function indexMotionChildren(children: readonly Element[]) {
 function motionIdentities(children: readonly Element[]) {
   const counts = new Map<string, number>()
   return children.map((child) => {
-    const key = child.getAttribute('data-ts-key')
+    const key = elementKey(child)
     if (key) return `key:${key}`
     const count = counts.get(child.localName) ?? 0
     counts.set(child.localName, count + 1)
@@ -4136,4 +4089,25 @@ function nonNegative(value: number | undefined, fallback: number) {
 
 function formatNumber(value: number) {
   return String(Math.round(value * 1_000) / 1_000)
+}
+
+function elementKey(element: Element) {
+  return element.getAttribute('data-ts-key')
+}
+
+function setMotionRole(element: Element, role: ChartMotionRole) {
+  element.setAttribute('data-ts-motion-role', role)
+}
+
+function clearMotionRole(element: Element) {
+  element.removeAttribute('data-ts-motion-role')
+}
+
+function restoreAttribute(
+  element: Element,
+  name: string,
+  value: string | null,
+) {
+  if (value === null) element.removeAttribute(name)
+  else element.setAttribute(name, value)
 }
