@@ -1453,11 +1453,7 @@ function createAxes(
       }
     }
 
-    if (guide.channel === 'x') {
-      renderXAxis(guide, axisPosition, includeOutward, includeCoordinate)
-    } else {
-      renderYAxis(guide, axisPosition, includeOutward, includeCoordinate)
-    }
+    renderAxis(guide, axisPosition, includeOutward, includeCoordinate)
 
     const distance =
       guide.side === 'top'
@@ -1481,29 +1477,40 @@ function createAxes(
   includeGuideStrokeMargins(margin, axes, chart)
   return { axes, margin }
 
-  function renderXAxis(
+  function renderAxis(
     guide: ResolvedPositionScale,
-    axisY: number,
+    axisPosition: number,
     includeOutward: (bounds: ChartBounds) => void,
     includeCoordinate: (coordinate: number) => void,
   ) {
     const presentation = axisPresentation(guide.options)
-    const bottom = guide.side === 'bottom'
-    const direction = bottom ? 1 : -1
+    const horizontal = guide.channel === 'x'
+    const positive = guide.side === 'bottom' || guide.side === 'right'
+    const direction = positive ? 1 : -1
+    const outerCoordinate = (bounds: ChartBounds) => {
+      const start = horizontal ? bounds.y : bounds.x
+      const size = horizontal ? bounds.height : bounds.width
+
+      return positive ? start + size : start
+    }
+    const farther = (left: number, right: number) =>
+      positive ? Math.max(left, right) : Math.min(left, right)
+
     if (presentation?.line !== false) {
       children.push({
         kind: 'rule',
         key: `${guide.id}-axis`,
-        x1: chart.x,
-        x2: chartRight,
-        y1: axisY,
-        y2: axisY,
+        x1: horizontal ? chart.x : axisPosition,
+        x2: horizontal ? chartRight : axisPosition,
+        y1: horizontal ? axisPosition : chart.y,
+        y2: horizontal ? axisPosition : chartBottom,
         style: axisStyle(presentation?.line),
       })
       includeCoordinate(
-        axisY + direction * guideLineHalfWidth(presentation?.line),
+        axisPosition + direction * guideLineHalfWidth(presentation?.line),
       )
     }
+
     const ticks = presentation?.ticks === false ? [] : guide.scale.ticks
     const tickSize = finiteMargin(
       presentation?.ticks === false ? 0 : (presentation?.ticks?.size ?? 4),
@@ -1518,7 +1525,7 @@ function createAxes(
         : createTickLabelCandidates(
             guide,
             withKeptTicks(guide.scale, guide.options, tickLabels),
-            axisY,
+            axisPosition,
             tickSize,
             tickPadding,
             tickLabels,
@@ -1530,31 +1537,32 @@ function createAxes(
     const visibleLabels =
       tickLabels === false
         ? []
-        : thinTickLabels(candidates, tickLabels, guide.scale.type === 'band')
-    let tickOuter = axisY
+        : thinTickLabels(
+            candidates,
+            tickLabels,
+            horizontal && guide.scale.type === 'band',
+          )
+    let tickOuter = axisPosition
 
     for (const tick of ticks) {
       if (tickSize <= 0) continue
-      const tickEnd = axisY + direction * tickSize
+      const tickEnd = axisPosition + direction * tickSize
       includeCoordinate(tickEnd)
-      tickOuter = bottom
-        ? Math.max(tickOuter, tickEnd)
-        : Math.min(tickOuter, tickEnd)
+      tickOuter = farther(tickOuter, tickEnd)
       children.push({
         kind: 'rule',
         key: `${guide.id}-tick-rule:${valueKey(tick.value)}`,
-        x1: tick.position,
-        x2: tick.position,
-        y1: axisY,
-        y2: tickEnd,
+        x1: horizontal ? tick.position : axisPosition,
+        x2: horizontal ? tick.position : tickEnd,
+        y1: horizontal ? axisPosition : tick.position,
+        y2: horizontal ? tickEnd : tick.position,
         style: axisStyle(),
       })
     }
+
     for (const candidate of visibleLabels) {
       includeOutward(candidate.bounds)
-      tickOuter = bottom
-        ? Math.max(tickOuter, candidate.bounds.y + candidate.bounds.height)
-        : Math.min(tickOuter, candidate.bounds.y)
+      tickOuter = farther(tickOuter, outerCoordinate(candidate.bounds))
       children.push(candidate.label)
     }
 
@@ -1562,20 +1570,27 @@ function createAxes(
     const labelText =
       typeof axisLabel === 'string' ? axisLabel : axisLabel?.text
     if (!labelText) return
+
     const labelOptions = typeof axisLabel === 'object' ? axisLabel : undefined
     const labelOffset = labelOptions?.offset ?? 'auto'
     const explicitOffset = labelOffset !== 'auto'
     const label: SceneLabel = {
       kind: 'label',
       key: `${guide.id}-label`,
-      x: chart.x + chart.width / 2,
-      y: explicitOffset
-        ? axisY + direction * Math.max(0, finiteMargin(labelOffset))
-        : tickOuter + direction * 8,
+      x: horizontal ? chart.x + chart.width / 2 : axisPosition,
+      y: horizontal
+        ? explicitOffset
+          ? axisPosition + direction * Math.max(0, finiteMargin(labelOffset))
+          : tickOuter + direction * 8
+        : chart.y + chart.height / 2,
       text: labelText,
       anchor: 'middle',
-      baseline: bottom && !explicitOffset ? 'hanging' : 'auto',
-      fontSize: labelOptions?.fontSize ?? (width < 360 ? 10 : 11),
+      baseline: horizontal
+        ? positive && !explicitOffset
+          ? 'hanging'
+          : 'auto'
+        : 'middle',
+      fontSize: labelOptions?.fontSize ?? (horizontal && width < 360 ? 10 : 11),
       fontWeight: labelOptions?.fontWeight ?? 600,
       style: {
         fill: labelOptions?.fill ?? theme.foreground,
@@ -1584,120 +1599,23 @@ function createAxes(
           : { opacity: labelOptions.opacity }),
       },
     }
-    includeOutward(measureSceneLabelBounds(label, measureText))
-    children.push(label)
-  }
 
-  function renderYAxis(
-    guide: ResolvedPositionScale,
-    axisX: number,
-    includeOutward: (bounds: ChartBounds) => void,
-    includeCoordinate: (coordinate: number) => void,
-  ) {
-    const presentation = axisPresentation(guide.options)
-    const right = guide.side === 'right'
-    const direction = right ? 1 : -1
-    if (presentation?.line !== false) {
-      children.push({
-        kind: 'rule',
-        key: `${guide.id}-axis`,
-        x1: axisX,
-        x2: axisX,
-        y1: chart.y,
-        y2: chartBottom,
-        style: axisStyle(presentation?.line),
-      })
-      includeCoordinate(
-        axisX + direction * guideLineHalfWidth(presentation?.line),
-      )
-    }
-    const ticks = presentation?.ticks === false ? [] : guide.scale.ticks
-    const tickSize = finiteMargin(
-      presentation?.ticks === false ? 0 : (presentation?.ticks?.size ?? 4),
-    )
-    const tickPadding = finiteMargin(
-      presentation?.ticks === false ? 0 : (presentation?.ticks?.padding ?? 4),
-    )
-    const tickLabels = tickLabelPresentation(presentation)
-    const candidates =
-      tickLabels === false
-        ? []
-        : createTickLabelCandidates(
-            guide,
-            withKeptTicks(guide.scale, guide.options, tickLabels),
-            axisX,
-            tickSize,
-            tickPadding,
-            tickLabels,
-            width,
-            theme,
-            measureText,
-            rightToLeft,
-          )
-    const visibleLabels =
-      tickLabels === false ? [] : thinTickLabels(candidates, tickLabels, false)
-    let tickOuter = axisX
-
-    for (const tick of ticks) {
-      if (tickSize <= 0) continue
-      const tickEnd = axisX + direction * tickSize
-      includeCoordinate(tickEnd)
-      tickOuter = right
-        ? Math.max(tickOuter, tickEnd)
-        : Math.min(tickOuter, tickEnd)
-      children.push({
-        kind: 'rule',
-        key: `${guide.id}-tick-rule:${valueKey(tick.value)}`,
-        x1: axisX,
-        x2: tickEnd,
-        y1: tick.position,
-        y2: tick.position,
-        style: axisStyle(),
-      })
-    }
-    for (const candidate of visibleLabels) {
-      includeOutward(candidate.bounds)
-      tickOuter = right
-        ? Math.max(tickOuter, candidate.bounds.x + candidate.bounds.width)
-        : Math.min(tickOuter, candidate.bounds.x)
-      children.push(candidate.label)
+    if (!horizontal) {
+      label.rotate = positive ? 90 : -90
+      if (explicitOffset) {
+        label.x =
+          axisPosition + direction * Math.max(0, finiteMargin(labelOffset))
+      } else {
+        const localBounds = measureSceneLabelBounds(
+          { ...label, x: 0, y: 0 },
+          measureText,
+        )
+        label.x = positive
+          ? tickOuter + 8 - localBounds.x
+          : tickOuter - 8 - (localBounds.x + localBounds.width)
+      }
     }
 
-    const axisLabel = presentation?.label
-    const labelText =
-      typeof axisLabel === 'string' ? axisLabel : axisLabel?.text
-    if (!labelText) return
-    const labelOptions = typeof axisLabel === 'object' ? axisLabel : undefined
-    const label: SceneLabel = {
-      kind: 'label',
-      key: `${guide.id}-label`,
-      x: axisX,
-      y: chart.y + chart.height / 2,
-      text: labelText,
-      anchor: 'middle',
-      baseline: 'middle',
-      rotate: right ? 90 : -90,
-      fontSize: labelOptions?.fontSize ?? 11,
-      fontWeight: labelOptions?.fontWeight ?? 600,
-      style: {
-        fill: labelOptions?.fill ?? theme.foreground,
-        ...(labelOptions?.opacity === undefined
-          ? { fillOpacity: 0.76 }
-          : { opacity: labelOptions.opacity }),
-      },
-    }
-    const labelOffset = labelOptions?.offset ?? 'auto'
-    if (labelOffset !== 'auto') {
-      label.x = axisX + direction * Math.max(0, finiteMargin(labelOffset))
-    } else {
-      const localBounds = measureSceneLabelBounds(
-        { ...label, x: 0, y: 0 },
-        measureText,
-      )
-      label.x = right
-        ? tickOuter + 8 - localBounds.x
-        : tickOuter - 8 - (localBounds.x + localBounds.width)
-    }
     includeOutward(measureSceneLabelBounds(label, measureText))
     children.push(label)
   }
