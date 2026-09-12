@@ -1249,18 +1249,19 @@ function createBarTracks(
         horizontal,
         horizontal ? targetX : targetY + targetHeight,
       )
-      const timing = timingFor({
-        phase: 'enter',
-        role: 'bar',
-        key,
-        markId: point?.markId ?? motionMarkId(scene, seriesKey),
-        seriesKey,
-        seriesIndex,
-        datumIndex,
-        datumCount: shapes.length,
-        datum: point?.datum,
-        point,
-      })
+      const timing = timingFor(
+        createMotionContext({
+          phase: 'enter',
+          role: 'bar',
+          key,
+          markId: point?.markId ?? motionMarkId(scene, seriesKey),
+          seriesKey,
+          seriesIndex,
+          datumIndex,
+          datumCount: shapes.length,
+          point,
+        }),
+      )
 
       tracks.push(
         createBarEntranceTrack(
@@ -1502,18 +1503,16 @@ function createCartesianPathTracks(
       ? 'area'
       : 'line'
     const seriesKey = elementKey(group) ?? `${role}:${seriesIndex}`
-    const timing = timingFor({
-      phase: 'enter',
-      role,
-      key: seriesKey,
-      markId: motionMarkId(scene, seriesKey),
-      seriesKey,
-      seriesIndex,
-      datumIndex: 0,
-      datumCount: 1,
-      datum: undefined,
-      point: undefined,
-    })
+    const timing = timingFor(
+      createMotionContext({
+        phase: 'enter',
+        role,
+        key: seriesKey,
+        markId: motionMarkId(scene, seriesKey),
+        seriesKey,
+        seriesIndex,
+      }),
+    )
     const horizontal = scenePathAffinity(scene, seriesKey) === 'y'
     const baseline = resolvePathBaseline(scene, horizontal)
     return createTransformEntranceTrack(group, role, timing, (progress) =>
@@ -1543,18 +1542,16 @@ function createRadialPathTracks(
         ? 'dot'
         : 'line'
     const seriesKey = elementKey(group) ?? `${role}:${seriesIndex}`
-    const timing = timingFor({
-      phase: 'enter',
-      role,
-      key: seriesKey,
-      markId: motionMarkId(scene, seriesKey),
-      seriesKey,
-      seriesIndex,
-      datumIndex: 0,
-      datumCount: 1,
-      datum: undefined,
-      point: undefined,
-    })
+    const timing = timingFor(
+      createMotionContext({
+        phase: 'enter',
+        role,
+        key: seriesKey,
+        markId: motionMarkId(scene, seriesKey),
+        seriesKey,
+        seriesIndex,
+      }),
+    )
     return createTransformEntranceTrack(
       group,
       role,
@@ -1607,18 +1604,16 @@ function createArcTracks(
     const role: ChartMotionRole = group.classList.contains('ts-chart__bar')
       ? 'bar'
       : 'arc'
-    const timing = timingFor({
-      phase: 'enter',
-      role,
-      key: seriesKey,
-      markId: motionMarkId(scene, seriesKey),
-      seriesKey,
-      seriesIndex,
-      datumIndex: 0,
-      datumCount: 1,
-      datum: undefined,
-      point: undefined,
-    })
+    const timing = timingFor(
+      createMotionContext({
+        phase: 'enter',
+        role,
+        key: seriesKey,
+        markId: motionMarkId(scene, seriesKey),
+        seriesKey,
+        seriesIndex,
+      }),
+    )
     const document = root.ownerDocument
     let definitions = root.querySelector<SVGDefsElement>('defs')
     if (!definitions) {
@@ -1955,13 +1950,11 @@ function motionPointScaleId(
 ): string | undefined {
   if (!point) return undefined
   const initialized = motionSceneSource(scene)?.[1]
-  const mark = initialized
-    ?.filter(
-      (candidate) =>
-        point.markId === candidate.id ||
-        point.markId.startsWith(`${candidate.id}:`),
-    )
-    .sort((left, right) => right.id.length - left.id.length)[0]
+  const mark = findLongestKeyPrefix(
+    initialized ?? [],
+    point.markId,
+    (mark) => mark.id,
+  )
   return mark?.channels[channel]?.scale
 }
 
@@ -2812,7 +2805,7 @@ function elementTimingContext(
   const shapes = barGroup ? barShapeElements(barGroup) : []
   const datumIndex =
     point?.datumIndex ?? Math.max(0, shapes.indexOf(element as BarShapeElement))
-  return {
+  return createMotionContext({
     phase,
     role,
     key,
@@ -2821,9 +2814,8 @@ function elementTimingContext(
     seriesIndex,
     datumIndex,
     datumCount: barGroup ? Math.max(1, shapes.length) : 1,
-    datum: point?.datum,
     point,
-  }
+  })
 }
 
 function guideOrMarkTimingContext(
@@ -2838,18 +2830,13 @@ function guideOrMarkTimingContext(
   if (focusGuide) {
     const ownerKey = elementKey(focusGuide) ?? key
     const markId = motionMarkId(scene, ownerKey)
-    return {
+    return createMotionContext({
       phase,
       role: markMotionRole(focusGuide, element),
       key,
       markId,
       seriesKey: ownerKey,
-      seriesIndex: 0,
-      datumIndex: 0,
-      datumCount: 1,
-      datum: undefined,
-      point: undefined,
-    }
+    })
   }
 
   const presentationFocusLayer = element.closest<SVGGElement>(
@@ -2869,18 +2856,16 @@ function guideOrMarkTimingContext(
     const markPoints = focusPoints.filter(
       (candidate) => candidate.markId === point.markId,
     )
-    return {
+    return createMotionContext({
       phase,
       role: markMotionRole(presentationFocusLayer, element),
       key,
       markId: point.markId,
       seriesKey: `${point.markId}:${motionGroupIdentity(point)}`,
-      seriesIndex: 0,
       datumIndex: point.datumIndex,
       datumCount: Math.max(1, markPoints.length),
-      datum: point.datum,
       point,
-    }
+    })
   }
 
   const axes = element.closest<SVGGElement>('g.ts-chart__axes')
@@ -2913,7 +2898,7 @@ function guideOrMarkTimingContext(
           (candidate) => elementKey(candidate)?.startsWith(prefix) ?? false,
         )
       : [element]
-    return {
+    return createMotionContext({
       phase,
       role,
       key,
@@ -2923,9 +2908,7 @@ function guideOrMarkTimingContext(
       seriesIndex: Math.max(0, Object.keys(scene.scales).indexOf(scaleId)),
       datumIndex: Math.max(0, peers.indexOf(element)),
       datumCount: Math.max(1, peers.length),
-      datum: undefined,
-      point: undefined,
-    }
+    })
   }
 
   const marks = element.closest<SVGGElement>('g.ts-chart__marks')
@@ -2957,18 +2940,16 @@ function guideOrMarkTimingContext(
   const seriesKey = point
     ? `${point.markId}:${String(point.group ?? '')}`
     : ownerKey
-  return {
+  return createMotionContext({
     phase,
     role,
     key,
     markId,
     seriesKey,
-    seriesIndex: 0,
     datumIndex: point?.datumIndex ?? 0,
     datumCount: Math.max(1, markPoints.length),
-    datum: point?.datum,
     point,
-  }
+  })
 }
 
 function guideScaleId(scene: ChartScene, key: string): string | undefined {
@@ -3080,19 +3061,30 @@ function motionPointForKey(
   points: readonly ChartPoint[],
   key: string,
 ): ChartPoint | undefined {
-  let match: ChartPoint | undefined
-  for (const point of points) {
-    if (
-      key !== point.key &&
-      key !== `${point.key}:dot` &&
-      !key.startsWith(`${point.key}:`)
-    ) {
-      continue
-    }
-    if (!match || point.key.length > match.key.length) match = point
-  }
-  return match
+  return findLongestKeyPrefix(points, key, (point) => point.key)
 }
+
+const motionClassRoles = [
+  'area',
+  'radial-area',
+  'bar',
+  'arc',
+  'arrow',
+  'band',
+  'dot',
+  'facet',
+  'frame',
+  'geo',
+  'hexagon',
+  'line',
+  'link',
+  'text',
+  'rect',
+  'waffle',
+  'rule',
+  'tick',
+  'vector',
+] as const
 
 function markMotionRole(owner: Element, element: Element): ChartMotionRole {
   let className = ''
@@ -3102,30 +3094,13 @@ function markMotionRole(owner: Element, element: Element): ChartMotionRole {
     if (current === owner) break
     current = current.parentElement
   }
-  if (
-    className.includes('ts-chart__area') ||
-    className.includes('ts-chart__radial-area')
+  // Preserve semantic precedence when a mark carries several geometry classes.
+  const role = motionClassRoles.find((role) =>
+    className.includes(`ts-chart__${role}`),
   )
-    return 'area'
-  // Radial bars also carry the arc geometry role for inspection. Keep the
-  // authored mark role semantic when both classes are present.
-  if (className.includes('ts-chart__bar')) return 'bar'
-  if (className.includes('ts-chart__arc')) return 'arc'
-  if (className.includes('ts-chart__arrow')) return 'arrow'
-  if (className.includes('ts-chart__band')) return 'band'
-  if (className.includes('ts-chart__dot')) return 'dot'
-  if (className.includes('ts-chart__facet')) return 'facet'
-  if (className.includes('ts-chart__frame')) return 'frame'
-  if (className.includes('ts-chart__geo')) return 'geo'
-  if (className.includes('ts-chart__hexagon')) return 'hexagon'
-  if (className.includes('ts-chart__line')) return 'line'
-  if (className.includes('ts-chart__link')) return 'link'
-  if (className.includes('ts-chart__text')) return 'text'
-  if (className.includes('ts-chart__rect')) return 'rect'
-  if (className.includes('ts-chart__waffle')) return 'rect'
-  if (className.includes('ts-chart__rule')) return 'rule'
-  if (className.includes('ts-chart__tick')) return 'tick'
-  if (className.includes('ts-chart__vector')) return 'vector'
+  if (role === 'radial-area') return 'area'
+  if (role === 'waffle') return 'rect'
+  if (role) return role
   if (element.localName === 'circle') return 'dot'
   if (element.localName === 'text') return 'text'
   if (element.localName === 'rect') return 'rect'
@@ -3135,19 +3110,20 @@ function markMotionRole(owner: Element, element: Element): ChartMotionRole {
 }
 
 function motionMarkId(scene: ChartScene, key: string): string | undefined {
-  const focusGuide = scene.focusGuides
-    ?.slice()
-    .sort((left, right) => right.key.length - left.key.length)
-    .find((guide) => key === guide.key || key.startsWith(`${guide.key}:`))
+  const focusGuide = findLongestKeyPrefix(
+    scene.focusGuides ?? [],
+    key,
+    (guide) => guide.key,
+  )
   if (focusGuide) return focusGuide.markId
+
   const source = motionSceneSource(scene)
-  const candidates = new Set([
+  const candidates = [
     ...scene.points.map((point) => point.markId),
     ...(source?.[1].map((mark) => mark.id) ?? []),
-  ])
-  return [...candidates]
-    .sort((left, right) => right.length - left.length)
-    .find((candidate) => key === candidate || key.startsWith(`${candidate}:`))
+  ]
+
+  return findLongestKeyPrefix(candidates, key, (candidate) => candidate)
 }
 
 function createPresentationTracks(
@@ -3269,18 +3245,19 @@ function createPresentationTracks(
       previous ??
       (horizontal ? { ...point, x: baseline } : { ...point, y: baseline })
     presented.set(identity, { ...point, x: start.x, y: start.y })
-    const timing = timingFor({
-      phase: defaultPhase === 'enter' ? 'enter' : phase,
-      role: 'bar',
-      key: point.key,
-      markId: point.markId,
-      seriesKey: point.markId,
-      seriesIndex: Math.max(0, series.indexOf(point.markId)),
-      datumIndex: point.datumIndex,
-      datumCount: counts.get(point.markId) ?? 1,
-      datum: point.datum,
-      point,
-    })
+    const timing = timingFor(
+      createMotionContext({
+        phase: defaultPhase === 'enter' ? 'enter' : phase,
+        role: 'bar',
+        key: point.key,
+        markId: point.markId,
+        seriesKey: point.markId,
+        seriesIndex: Math.max(0, series.indexOf(point.markId)),
+        datumIndex: point.datumIndex,
+        datumCount: counts.get(point.markId) ?? 1,
+        point,
+      }),
+    )
     const states = pointValueStates(runtime, identity, [start.x, start.y])
     tracks.push({
       ...timing,
@@ -3379,23 +3356,22 @@ function createPresentationTracks(
     )
     const group = pathGroups.get(seriesKey)
     const role = group ? markMotionRole(group, group) : 'line'
-    const timing = timingFor({
-      phase:
-        defaultPhase === 'enter'
-          ? 'enter'
-          : previous.some(Boolean)
-            ? 'update'
-            : 'enter',
-      role,
-      key: seriesKey,
-      markId: points[0]?.markId ?? motionMarkId(scene, seriesKey),
-      seriesKey,
-      seriesIndex: Math.max(0, series.indexOf(seriesKey)),
-      datumIndex: 0,
-      datumCount: points.length,
-      datum: undefined,
-      point: undefined,
-    })
+    const timing = timingFor(
+      createMotionContext({
+        phase:
+          defaultPhase === 'enter'
+            ? 'enter'
+            : previous.some(Boolean)
+              ? 'update'
+              : 'enter',
+        role,
+        key: seriesKey,
+        markId: points[0]?.markId ?? motionMarkId(scene, seriesKey),
+        seriesKey,
+        seriesIndex: Math.max(0, series.indexOf(seriesKey)),
+        datumCount: points.length,
+      }),
+    )
     const from: number[] = []
     const to: number[] = []
     const states: MotionValueState[] = []
@@ -3456,18 +3432,18 @@ function createPresentationTracks(
       }
     }
     tracks.push({
-      ...timingFor({
-        phase: 'exit',
-        role,
-        key: point.key,
-        markId: point.markId,
-        seriesKey: point.markId,
-        seriesIndex: Math.max(0, series.indexOf(point.markId)),
-        datumIndex: point.datumIndex,
-        datumCount: 1,
-        datum: point.datum,
-        point,
-      }),
+      ...timingFor(
+        createMotionContext({
+          phase: 'exit',
+          role,
+          key: point.key,
+          markId: point.markId,
+          seriesKey: point.markId,
+          seriesIndex: Math.max(0, series.indexOf(point.markId)),
+          datumIndex: point.datumIndex,
+          point,
+        }),
+      ),
       values: bindMotionValues(undefined, [0], [1]),
       apply() {},
       finish: cleanup,
@@ -3660,17 +3636,18 @@ function resolveTiming(
     )
   }
 
-  apply(definitions?.default)
-  if (context.markId && definitions?.marks) {
-    const markId = Object.keys(definitions.marks)
-      .filter(
-        (candidate) =>
-          context.markId === candidate ||
-          context.markId?.startsWith(`${candidate}:`),
-      )
-      .sort((left, right) => right.length - left.length)[0]
-    if (markId) apply(definitions.marks[markId])
+  const applyMark = (marks: SceneMotionDefinitions['marks']) => {
+    if (!context.markId || !marks) return
+    const markId = findLongestKeyPrefix(
+      Object.keys(marks),
+      context.markId,
+      (key) => key,
+    )
+    if (markId) apply(marks[markId])
   }
+
+  apply(definitions?.default)
+  applyMark(definitions?.marks)
   const guideId = context.scaleId ?? context.axis
   if (guideId) {
     apply(definitions?.guides?.[`axis:${guideId}`])
@@ -3679,16 +3656,7 @@ function resolveTiming(
     }
   }
   apply(overrides?.default)
-  if (context.markId && overrides?.marks) {
-    const markId = Object.keys(overrides.marks)
-      .filter(
-        (candidate) =>
-          context.markId === candidate ||
-          context.markId?.startsWith(`${candidate}:`),
-      )
-      .sort((left, right) => right.length - left.length)[0]
-    if (markId) apply(overrides.marks[markId])
-  }
+  applyMark(overrides?.marks)
 
   // A delayed physical retarget would freeze the sampled velocity. Spring
   // updates therefore begin immediately; use delay for enter/exit choreography.
@@ -4055,4 +4023,39 @@ function restoreAttribute(
 ) {
   if (value === null) element.removeAttribute(name)
   else element.setAttribute(name, value)
+}
+
+function createMotionContext(
+  context: Pick<ChartMotionContext, 'phase' | 'role' | 'key' | 'seriesKey'> &
+    Partial<ChartMotionContext>,
+): ChartMotionContext {
+  return {
+    seriesIndex: 0,
+    datumIndex: 0,
+    datumCount: 1,
+    datum: context.point?.datum,
+    point: undefined,
+    ...context,
+  }
+}
+
+function findLongestKeyPrefix<T>(
+  values: Iterable<T>,
+  key: string,
+  getKey: (value: T) => string,
+): T | undefined {
+  let result: T | undefined
+  let length = -1
+  for (const value of values) {
+    const candidate = getKey(value)
+    if (
+      candidate.length > length &&
+      (key === candidate || key.startsWith(`${candidate}:`))
+    ) {
+      result = value
+      length = candidate.length
+    }
+  }
+
+  return result
 }
