@@ -158,8 +158,8 @@ export function resolveGuideMargins(
   let bottom = inset
   let left = inset
 
-  visitLabels(axes, 0, 0, (label, translateX, translateY) => {
-    if (!label.text) return
+  visitGuideNodes(axes, 0, 0, (label, translateX, translateY) => {
+    if (label.kind !== 'label' || !label.text) return
 
     const bounds = measureSceneLabelBounds(label, measureText)
     const boundsLeft = bounds.x + translateX
@@ -186,7 +186,9 @@ export function includeGuideStrokeMargins(
   guides: SceneGroup,
   plot: ChartBounds,
 ): void {
-  visitRules(guides, 0, 0, (rule, translateX, translateY) => {
+  visitGuideNodes(guides, 0, 0, (rule, translateX, translateY) => {
+    if (rule.kind !== 'rule') return
+
     const style = rule.style
     const extendsGeometry =
       style?.strokeWidth !== undefined ||
@@ -219,37 +221,17 @@ export function includeGuideStrokeMargins(
   })
 }
 
-function visitLabels(
-  node: SceneNode,
-  translateX: number,
-  translateY: number,
-  visit: (label: SceneLabel, translateX: number, translateY: number) => void,
-): void {
-  if (node.kind === 'label') {
-    visit(node, translateX, translateY)
-    return
-  }
-
-  if (node.kind !== 'group') return
-
-  const childTranslateX = translateX + (node.translateX ?? 0)
-  const childTranslateY = translateY + (node.translateY ?? 0)
-  for (const child of node.children) {
-    visitLabels(child, childTranslateX, childTranslateY, visit)
-  }
-}
-
-function visitRules(
+function visitGuideNodes(
   node: SceneNode,
   translateX: number,
   translateY: number,
   visit: (
-    rule: Extract<SceneNode, { kind: 'rule' }>,
+    node: Extract<SceneNode, { kind: 'label' | 'rule' }>,
     translateX: number,
     translateY: number,
   ) => void,
 ): void {
-  if (node.kind === 'rule') {
+  if (node.kind === 'label' || node.kind === 'rule') {
     visit(node, translateX, translateY)
     return
   }
@@ -259,7 +241,7 @@ function visitRules(
   const childTranslateX = translateX + (node.translateX ?? 0)
   const childTranslateY = translateY + (node.translateY ?? 0)
   for (const child of node.children) {
-    visitRules(child, childTranslateX, childTranslateY, visit)
+    visitGuideNodes(child, childTranslateX, childTranslateY, visit)
   }
 }
 

@@ -1343,27 +1343,16 @@ function createGrid(
     const style = guideLineStyle(guide.options.grid)
     for (const tick of guide.scale.ticks) {
       const key = `${guide.id}-grid:${valueKey(tick.value)}`
-      children.push(
-        guide.channel === 'x'
-          ? {
-              kind: 'rule',
-              key,
-              x1: tick.position,
-              x2: tick.position,
-              y1: chart.y,
-              y2: chart.y + chart.height,
-              ...(style ? { style } : {}),
-            }
-          : {
-              kind: 'rule',
-              key,
-              x1: chart.x,
-              x2: chart.x + chart.width,
-              y1: tick.position,
-              y2: tick.position,
-              ...(style ? { style } : {}),
-            },
-      )
+      const horizontal = guide.channel === 'x'
+      children.push({
+        kind: 'rule',
+        key,
+        x1: horizontal ? tick.position : chart.x,
+        x2: horizontal ? tick.position : chart.x + chart.width,
+        y1: horizontal ? chart.y : tick.position,
+        y2: horizontal ? chart.y + chart.height : tick.position,
+        style,
+      })
     }
   }
 
@@ -1760,52 +1749,45 @@ function createTickLabelCandidates(
     const dy = resolveTickLabelValue(options.dy, context) ?? 0
     // Automatic anchors preserve a physical placement outside the plot.
     // Authored anchors remain logical SVG start/end values.
-    const automaticAnchor: NonNullable<SceneLabel['anchor']> =
+    const anchorSide =
       guide.channel === 'y'
         ? positiveSide
-          ? physicalTextAnchor('left', rightToLeft ? 'rtl' : 'ltr')
-          : physicalTextAnchor('right', rightToLeft ? 'rtl' : 'ltr')
+          ? 'left'
+          : 'right'
         : (rotate ?? 0) < 0
-          ? physicalTextAnchor('right', rightToLeft ? 'rtl' : 'ltr')
+          ? 'right'
           : (rotate ?? 0) > 0
-            ? physicalTextAnchor('left', rightToLeft ? 'rtl' : 'ltr')
+            ? 'left'
             : 'middle'
+    const automaticAnchor = physicalTextAnchor(
+      anchorSide,
+      rightToLeft ? 'rtl' : 'ltr',
+    )
     const anchor =
       resolveTickLabelValue(options.anchor, context) ?? automaticAnchor
-    const label: SceneLabel =
-      guide.channel === 'x'
-        ? {
-            kind: 'label',
-            key: `${guide.id}-tick-label:${valueKey(tick.value)}`,
-            x: tick.position + dx,
-            y:
-              axisPosition + direction * (size + padding + fontSize * 0.8) + dy,
-            text: tick.label,
-            anchor,
-            rotate,
-            fontSize,
-            fontWeight,
-            style: {
-              fill: theme.muted,
-              ...(opacity === undefined ? { fillOpacity: 0.68 } : { opacity }),
-            },
-          }
-        : {
-            kind: 'label',
-            key: `${guide.id}-tick-label:${valueKey(tick.value)}`,
-            x: axisPosition + direction * (size + padding) + dx,
-            y: tick.position + dy,
-            text: tick.label,
-            anchor,
-            baseline: 'middle',
-            rotate,
-            fontSize,
-            fontWeight,
-            style: {
-              fill: theme.muted,
-              ...(opacity === undefined ? { fillOpacity: 0.68 } : { opacity }),
-            },
-          }
+    const horizontal = guide.channel === 'x'
+    const label: SceneLabel = {
+      kind: 'label',
+      key: `${guide.id}-tick-label:${valueKey(tick.value)}`,
+      x:
+        (horizontal
+          ? tick.position
+          : axisPosition + direction * (size + padding)) + dx,
+      y: horizontal
+        ? axisPosition + direction * (size + padding + fontSize * 0.8) + dy
+        : tick.position + dy,
+      text: tick.label,
+      anchor,
+      baseline: horizontal ? undefined : 'middle',
+      rotate,
+      fontSize,
+      fontWeight,
+      style: {
+        fill: theme.muted,
+        ...(opacity === undefined ? { fillOpacity: 0.68 } : { opacity }),
+      },
+    }
+
     return {
       value: tick.value,
       label,
