@@ -1,3 +1,4 @@
+import { clampNonnegativeNumber } from './number-internal'
 import { focusedNodeKeys, resolveFocusScene } from './focus-layer'
 import { resolveFocusGuides } from './focus-presentation'
 import { resolveMarkStateScene } from './mark-state'
@@ -3625,7 +3626,7 @@ function resolveTiming(
         ? authored.delay(context)
         : authored.delay
     if (authoredDelay !== undefined) {
-      delay = nonNegative(authoredDelay, delay)
+      delay = clampNonnegativeNumber(authoredDelay, delay)
     }
     if (authored.path !== undefined) path = authored.path
     transition = resolveTransition(
@@ -3935,7 +3936,7 @@ function resolveTransition(
   }
   return {
     type: 'tween',
-    duration: nonNegative(
+    duration: clampNonnegativeNumber(
       transition?.duration,
       fallback?.type === 'tween' ? fallback.duration : fallbackDuration,
     ),
@@ -3994,10 +3995,6 @@ function cubicBezier(x1: number, y1: number, x2: number, y2: number) {
 function numberAttribute(element: Element, name: string) {
   const value = Number(element.getAttribute(name))
   return Number.isFinite(value) ? value : 0
-}
-
-function nonNegative(value: number | undefined, fallback: number) {
-  return Number.isFinite(value) ? Math.max(0, value!) : fallback
 }
 
 function formatNumber(value: number) {

@@ -1,3 +1,4 @@
+import { finiteNonNegative, clampNonnegativeNumber } from './number-internal'
 import { createColorScale, valueKey } from './scales'
 import { resolveConfiguredScale } from './configured-scale'
 import {
@@ -1269,12 +1270,13 @@ function resolveMarginLocks(
   margin: StaticChartDefinition['margin'],
 ): Partial<ChartMargin> {
   if (typeof margin === 'number') {
-    return uniformMargin(finiteMargin(margin))
+    return uniformMargin(clampNonnegativeNumber(margin))
   }
   if (!margin) return {}
   const locks: Partial<ChartMargin> = {}
   for (const side of marginSides) {
-    if (margin[side] !== undefined) locks[side] = finiteMargin(margin[side])
+    if (margin[side] !== undefined)
+      locks[side] = clampNonnegativeNumber(margin[side])
   }
   return locks
 }
@@ -1299,19 +1301,6 @@ function marginsEqual(left: ChartMargin, right: ChartMargin): boolean {
   return marginSides.every(
     (side) => Math.abs(left[side] - right[side]) <= layoutTolerance,
   )
-}
-
-function finiteMargin(value: number | undefined): number {
-  return value !== undefined && Number.isFinite(value) ? Math.max(0, value) : 0
-}
-
-function finiteNonNegative(
-  value: number | undefined,
-  fallback: number,
-): number {
-  return value !== undefined && Number.isFinite(value) && value >= 0
-    ? value
-    : fallback
 }
 
 function uniformMargin(value: number): ChartMargin {
@@ -1512,10 +1501,10 @@ function createAxes(
     }
 
     const ticks = presentation?.ticks === false ? [] : guide.scale.ticks
-    const tickSize = finiteMargin(
+    const tickSize = clampNonnegativeNumber(
       presentation?.ticks === false ? 0 : (presentation?.ticks?.size ?? 4),
     )
-    const tickPadding = finiteMargin(
+    const tickPadding = clampNonnegativeNumber(
       presentation?.ticks === false ? 0 : (presentation?.ticks?.padding ?? 4),
     )
     const tickLabels = tickLabelPresentation(presentation)
@@ -1580,7 +1569,7 @@ function createAxes(
       x: horizontal ? chart.x + chart.width / 2 : axisPosition,
       y: horizontal
         ? explicitOffset
-          ? axisPosition + direction * Math.max(0, finiteMargin(labelOffset))
+          ? axisPosition + direction * clampNonnegativeNumber(labelOffset)
           : tickOuter + direction * 8
         : chart.y + chart.height / 2,
       text: labelText,
@@ -1603,8 +1592,7 @@ function createAxes(
     if (!horizontal) {
       label.rotate = positive ? 90 : -90
       if (explicitOffset) {
-        label.x =
-          axisPosition + direction * Math.max(0, finiteMargin(labelOffset))
+        label.x = axisPosition + direction * clampNonnegativeNumber(labelOffset)
       } else {
         const localBounds = measureSceneLabelBounds(
           { ...label, x: 0, y: 0 },
@@ -1681,10 +1669,10 @@ function resolveTickCount(
   }
   if (configured.values) return Math.max(1, configured.values.length)
   if (configured.count !== undefined) {
-    return Math.max(1, Math.floor(finiteMargin(configured.count)))
+    return Math.max(1, Math.floor(clampNonnegativeNumber(configured.count)))
   }
   if (configured.spacing !== undefined) {
-    const spacing = Math.max(1, finiteMargin(configured.spacing))
+    const spacing = Math.max(1, clampNonnegativeNumber(configured.spacing))
     return Math.max(1, Math.floor(length / spacing))
   }
   return Math.max(2, Math.min(maximum, Math.floor(length / defaultSpacing)))
@@ -1847,7 +1835,7 @@ function thinTickLabels(
 ): TickLabelCandidate[] {
   if (options.thin === false || candidates.length < 2) return [...candidates]
   const thin = typeof options.thin === 'object' ? options.thin : {}
-  const minGap = Math.max(0, finiteMargin(thin.minGap ?? 4))
+  const minGap = clampNonnegativeNumber(thin.minGap ?? 4)
   const selected: TickLabelCandidate[] = candidates.filter(
     (candidate) => candidate.hard,
   )

@@ -1,3 +1,8 @@
+import {
+  finiteNumber,
+  finitePositive,
+  finiteNonNegative,
+} from './number-internal'
 import type {
   ChartBounds,
   ChartMargin,
@@ -292,23 +297,4 @@ function estimateCharacterWidth(character: string): number {
   if (/[0-9]/u.test(character)) return 0.56
   if (character.codePointAt(0)! > 0x7f) return 1
   return 0.54
-}
-
-function finiteNonNegative(
-  value: number | undefined,
-  fallback: number,
-): number {
-  return value !== undefined && Number.isFinite(value) && value >= 0
-    ? value
-    : fallback
-}
-
-function finiteNumber(value: number | undefined, fallback: number): number {
-  return value !== undefined && Number.isFinite(value) ? value : fallback
-}
-
-function finitePositive(value: number | undefined, fallback: number): number {
-  return value !== undefined && Number.isFinite(value) && value > 0
-    ? value
-    : fallback
 }
