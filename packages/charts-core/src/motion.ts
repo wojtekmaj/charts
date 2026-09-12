@@ -1,7 +1,11 @@
 import { focusedNodeKeys, resolveFocusScene } from './focus-layer'
 import { resolveFocusGuides } from './focus-presentation'
 import { resolveMarkStateScene } from './mark-state'
-import { reconcileChartSvg, reconcileChartSvgFragment } from './reconcile'
+import {
+  reconcileSvgMarkup,
+  reconcileSvgFragment,
+  reconcileElement,
+} from './reconcile-internal'
 import { chartSceneSource } from './scene-source'
 import {
   sceneMotionNode,
@@ -903,7 +907,7 @@ function createMotionSvgChartRenderer<
               false)
           const markup = renderSvg(presented.scene, renderOptions)
           cancelAnimation = reduced
-            ? reconcileChartSvg(container, markup)
+            ? reconcileSvgMarkup(container, markup)
             : motion.animateSvg({
                 container,
                 scene: presented.scene as ChartScene<TDatum>,
@@ -995,7 +999,7 @@ function createMotionSvgChartRenderer<
           dataMotionActive = animate && !viewportMoved
           pendingStateFocus = dataMotionActive ? desiredStateFocus : undefined
           if (animate && !viewportMoved) {
-            if (initial) reconcileChartSvg(container, markup)
+            if (initial) reconcileSvgMarkup(container, markup)
             cancelAnimation = motion.animateSvg({
               container,
               scene: nextScene as ChartScene<TDatum>,
@@ -1018,7 +1022,7 @@ function createMotionSvgChartRenderer<
               },
             })
           } else {
-            reconcileChartSvg(container, markup)
+            reconcileSvgMarkup(container, markup)
             publishPresentationPoints(nextScene.points)
             dataMotionActive = false
           }
@@ -1185,7 +1189,7 @@ function paintMotionSvgFocusGuides<TDatum>(options: {
 
     const markup = renderFocusGuideLayer(nodes, placement, idPrefix)
     if (reduced || !visible.has(placement)) {
-      reconcileChartSvgFragment(layer, markup)
+      reconcileSvgFragment(layer, markup)
     } else {
       cancellations.push(
         motion.animateSvgFragment({
@@ -2082,51 +2086,12 @@ function reconcileMotionElement(
   tracks: MotionTrack[],
   context: MotionReconcileContext,
 ) {
-  addUpdateTrack(current, next, tracks, context)
-
-  if (!next.firstElementChild) {
-    if (current.firstElementChild) {
-      for (const child of [...current.children]) {
-        addExitMotionTrack(child, tracks, context)
-      }
-    } else if (current.textContent !== next.textContent) {
-      current.textContent = next.textContent
-    }
-    return
-  }
-
-  const currentChildren = [...current.children]
-  const nextChildren = [...next.children]
-  const currentByIdentity = indexMotionChildren(currentChildren)
-  const nextIdentities = motionIdentities(nextChildren)
-  const retained = new Set<Element>()
-  let cursor = current.firstElementChild
-
-  nextChildren.forEach((nextChild, index) => {
-    const matched = currentByIdentity.get(nextIdentities[index])
-    let rendered: Element
-    if (
-      matched &&
-      matched.namespaceURI === nextChild.namespaceURI &&
-      matched.localName === nextChild.localName
-    ) {
-      rendered = matched
-      retained.add(matched)
-      if (rendered !== cursor) current.insertBefore(rendered, cursor)
-      reconcileMotionElement(rendered, nextChild, tracks, context)
-    } else {
-      rendered = nextChild.cloneNode(true) as Element
-      current.insertBefore(rendered, cursor)
-      addEnterMotionTrack(rendered, tracks, context)
-    }
-    cursor = rendered.nextElementSibling
+  reconcileElement(current, next, {
+    update: (current, next) => addUpdateTrack(current, next, tracks, context),
+    enter: (element) => addEnterMotionTrack(element, tracks, context),
+    exit: (element) => addExitMotionTrack(element, tracks, context),
+    replaceDefinitions: false,
   })
-
-  for (const child of currentChildren) {
-    if (!retained.has(child) && child.parentElement === current) {
-      addExitMotionTrack(child, tracks, context)
-    }
-  }
 }
 
 function addUpdateTrack(
@@ -3645,26 +3610,6 @@ function bindMotionValues(
       to: target,
       velocity: state.velocity,
     }
-  })
-}
-
-function indexMotionChildren(children: readonly Element[]) {
-  const result = new Map<string, Element>()
-  motionIdentities(children).forEach((identity, index) => {
-    const child = children[index]
-    if (child) result.set(identity, child)
-  })
-  return result
-}
-
-function motionIdentities(children: readonly Element[]) {
-  const counts = new Map<string, number>()
-  return children.map((child) => {
-    const key = elementKey(child)
-    if (key) return `key:${key}`
-    const count = counts.get(child.localName) ?? 0
-    counts.set(child.localName, count + 1)
-    return `tag:${child.localName}:${count}`
   })
 }
 
